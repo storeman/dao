@@ -7,6 +7,10 @@ from pathlib import Path
 from dao.prog.da_report import Report
 from dao.prog.config.loader import ConfigurationLoader
 
+from sqlalchemy import (
+    Table,
+)
+
 v2 = Blueprint("v2", __name__)
 
 @v2.context_processor
@@ -683,4 +687,23 @@ def secrets():
         content=content,
         success=success,
         error=error,
+    )
+
+
+@v2.route("/config-vars", methods=["GET", "POST"])
+def config_vars():
+    report = Report(app_datapath + "/options.json")
+
+    metadata = report.db_da.metadata
+    engine = report.db_da.engine
+
+    with engine.connect() as conn:
+        variabel = Table("variabel", metadata, autoload_with=engine)
+        select = variabel.select()
+
+        vars = conn.execute(select).fetchall()
+
+    return render_template(
+        "v2/config-vars.html",
+        vars=vars,
     )
