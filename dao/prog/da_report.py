@@ -3428,7 +3428,7 @@ class Report(DaBase):
         plt.close(fig)
         return report_data
 
-    def get_vars(self):
+    def get_vars(self, enabled_only = False):
         metadata = self.db_da.metadata
         engine = self.db_da.engine
         variabel = Table("variabel", metadata, autoload_with=engine)
@@ -3448,6 +3448,8 @@ class Report(DaBase):
             .where(variabel.c.id.in_(gebruikte_variabelen))
             .order_by(variabel.c.name)
         )
+        if enabled_only:
+            query = query.where(variabel.c.enabled == 1)
 
         with self.db_da.engine.connect() as connection:
             rows = connection.execute(query).mappings().all()

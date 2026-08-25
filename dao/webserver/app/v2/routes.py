@@ -8,7 +8,7 @@ from dao.prog.da_report import Report
 from dao.prog.config.loader import ConfigurationLoader
 
 from sqlalchemy import (
-    Table,
+    Table, update, bindparam
 )
 
 v2 = Blueprint("v2", __name__)
@@ -305,6 +305,7 @@ def log():
 def delete_file():
     post_data = request.form.to_dict(flat=True)
 
+    post_data = request.form.to_dict(flat=True)
     if post_data["confirm"] == "1" and re.match(r'^(images|log)/[^/]+\.(log|png)$', post_data["file"]):
         os.remove(app_datapath + post_data["file"])
 
@@ -619,7 +620,7 @@ def reportsv2():
     fields = fields.split(",")
 
     report = Report(app_datapath + "/options.json")
-    vars = report.get_vars()
+    vars = report.get_vars(True)
 
     return render_template(
         "v2/reports-v2.html",
@@ -628,6 +629,7 @@ def reportsv2():
         aggregate=aggregate,
         vars=vars,
         fields=fields,
+        datasets_config=_datasets_config(),
     )
 
 
@@ -697,8 +699,52 @@ def config_vars():
     metadata = report.db_da.metadata
     engine = report.db_da.engine
 
+    variabel = Table("variabel", metadata, autoload_with=engine)
+    if request.method == "POST":
+        rows = {}
+        pattern = re.compile(r"^var\[(\d+)\]\[([a-zA-Z0-9_]+)\]$")
+
+        allowed_fields = {
+            "name",
+            "enabled",
+            "chart_color",
+        }
+
+        for key, value in request.form.items():
+            match = pattern.match(key)
+            if not match:
+                continue
+
+            row_id = int(match.group(1))
+            field = match.group(2)
+
+            if field not in allowed_fields:
+                continue
+
+            value = request.form.getlist(key)[-1]
+            rows.setdefault(row_id, {})[field] = value
+
+        updates = [
+            {
+                "_id": row_id,
+                **values,
+            }
+            for row_id, values in rows.items()
+        ]
+
+        stmt = (
+            update(variabel)
+            .where(variabel.c.id == bindparam("_id"))
+            .values(
+                name=bindparam("name"),
+                chart_color=bindparam("chart_color"),
+            )
+        )
+
+        with engine.begin() as conn:
+            conn.execute(stmt, updates)
+
     with engine.connect() as conn:
-        variabel = Table("variabel", metadata, autoload_with=engine)
         select = variabel.select()
 
         vars = conn.execute(select).fetchall()
@@ -707,3 +753,63 @@ def config_vars():
         "v2/config-vars.html",
         vars=vars,
     )
+
+@v2.route("/view-file", methods=["GET", "POST"])
+def view_file():
+    file =  request.args.get("file")
+
+    log_file = app_datapath + "log/" + file
+    with open(log_file, "r") as f:
+        content = f.read()
+
+    return render_template(
+        "v2/view-file.html",
+        content=content,
+        filename=log_file,
+    )
+
+def _alter_hex(hex_color, factor):
+    """
+    factor < 1 = darker
+    """
+    hex_color = hex_color.lstrip("#")
+
+    r = int(hex_color[0:2], 16)
+    g = int(hex_color[2:4], 16)
+    b = int(hex_color[4:6], 16)
+
+    r = max(0, min(255, int(r * factor)))
+    g = max(0, min(255, int(g * factor)))
+    b = max(0, min(255, int(b * factor)))
+
+    return f"#{r:02x}{g:02x}{b:02x}"
+
+def _datasets_config():
+    report = Report(app_datapath + "/options.json")
+    metadata = report.db_da.metadata
+    engine = report.db_da.engine
+
+    variabel = Table("variabel", metadata, autoload_with=engine)
+
+    with engine.connect() as conn:
+        vars = conn.execute(
+            variabel.select()
+            .where(variabel.c.enabled == 1)
+        ).fetchall()
+
+    datasets = []
+
+    for row in vars:
+        color = row.chart_color or "#ffffff"
+
+        datasets.append({
+            "label": row.name,
+            "code": row.code,
+            "borderColor": _alter_hex(color, 0.8),
+            "backgroundColor": color,
+            "type": "bar" if row.dim == "kWh" else "line",
+            "yAxisID": f"y_{row.dim}",
+            "unit": row.dim,
+        })
+
+    return datasets
