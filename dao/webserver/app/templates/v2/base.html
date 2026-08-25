@@ -1,7 +1,7 @@
-{% macro nav_item(endpoint, label, icon=None) %}
-<li class="nav-item">
-    <a class="nav-link {% if request.endpoint == endpoint %}active{% endif %}"
-       aria-current="page" href="{{ url_for(endpoint) }}">{{label}}</a>
+{% macro nav_item(endpoint, label, icon=None, url=None, menu=False) %}
+<li class="{{ 'menu-item' if menu else 'nav-item' }}">
+    <a class="{{ 'menu-item' if menu else 'nav-link' }} {% if request.endpoint == endpoint %}active{% endif %}"
+       aria-current="page" href="{% if url %}{{url}}{% else %}{{ url_for(endpoint) }}{% endif %}">{{label}}</a>
 </li>
 {% endmacro %}
 
@@ -72,7 +72,6 @@
                     .forEach(toggle => {
                         toggle.addEventListener('click', () => {
                             const theme = toggle.getAttribute('data-bs-theme-value')
-                            console.log(theme)
                             setStoredTheme(theme)
                             setTheme(theme)
                         })
@@ -83,55 +82,59 @@
     {{ vite_tags|safe }}
 </head>
 <body class="d-flex flex-column min-vh-100">
-<nav class="navbar navbar-expand-lg bg-body-tertiary">
+<nav class="navbar lg:navbar-expand bg-3 flex-shrink-0">
     <div class="container">
         <a class="navbar-brand text-center" href="{{ url_for('v2.chart') }}">DAO</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarSupportedContent"
+        <button class="navbar-toggler" type="button" data-bs-toggle="drawer" data-bs-target="#navbarSupportedContent"
                 aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
-        <div class="collapse navbar-collapse" id="navbarSupportedContent">
-            <ul class="navbar-nav me-auto mb-2 mb-lg-0">
-                {{ nav_item('v2.chart', 'Charts') }}
-                {{ nav_item('v2.log', 'Logs') }}
-                {{ nav_item('v2.tasks', 'Tasks') }}
-                {{ nav_item('v2.reports', 'Reports') }}
-                {{ nav_item('v2.savings', 'Savings') }}
-                {{ nav_item('v2.solar', 'Solar') }}
-                {{ nav_item('v2.reportsv2', 'Reports V2') }}
-                <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" role="button" data-bs-toggle="dropdown"
-                       aria-expanded="false">
-                        Admin
+        <dialog class="drawer lg:drawer drawer-sheet" id="navbarSupportedContent">
+            <div class="drawer-body">
+                <ul class="navbar-nav me-auto mb-2 lg:mb-0">
+                    {{ nav_item('v2.chart', 'Charts') }}
+                    {{ nav_item('v2.log', 'Logs') }}
+                    {{ nav_item('v2.tasks', 'Tasks') }}
+                    {{ nav_item('v2.reports', 'Reports') }}
+                    {{ nav_item('v2.savings', 'Savings') }}
+                    {{ nav_item('v2.solar', 'Solar') }}
+                    {{ nav_item('v2.reportsv2', 'Reports V2') }}
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" role="button" data-bs-toggle="menu"
+                           aria-expanded="false">
+                            Admin
+                        </a>
+                        <ul class="menu">
+                            {{ nav_item('v2.config', 'Config', menu=True) }}
+                            {{ nav_item('v2.secrets', 'Secrets', menu=True) }}
+                            {{ nav_item('v2.view_file', 'dashboard.log', url=url_for('v2.view_file', file='dashboard.log'), menu=True) }}
+                            {{ nav_item('v2.config_vars', 'Vars', menu=True) }}
+                        </ul>
+                    </li>
+                </ul>
+                <div class="align-items-center d-flex float-end">
+                    <a href="#" data-bs-theme-value="dark"
+                       class="theme-stored-dark-hidden theme-stored-auto-hidden"
+                       title="Light mode active">
+                        <i class="bi bi-sun"></i>
                     </a>
-                    <ul class="dropdown-menu">
-                        {{ nav_item('v2.config', 'Config') }}
-                        {{ nav_item('v2.secrets', 'Secrets') }}
-                    </ul>
-                </li>
-            </ul>
-            <div class="align-items-center d-flex float-end">
-                <a href="#" data-bs-theme-value="dark"
-                   class="theme-stored-dark-hidden theme-stored-auto-hidden"
-                   title="Light mode active">
-                    <i class="bi bi-sun"></i>
-                </a>
-                <a href="#" data-bs-theme-value="auto" class="theme-stored-auto-hidden theme-stored-light-hidden"
-                   title="Dark mode active">
-                    <i class="bi bi-moon"></i>
-                </a>
-                <a href="#" data-bs-theme-value="light" class="theme-stored-dark-hidden theme-stored-light-hidden"
-                   title="Auto mode active">
-                    <i class="bi bi-circle-half"></i>
-                </a>
+                    <a href="#" data-bs-theme-value="auto" class="theme-stored-auto-hidden theme-stored-light-hidden"
+                       title="Dark mode active">
+                        <i class="bi bi-moon"></i>
+                    </a>
+                    <a href="#" data-bs-theme-value="light" class="theme-stored-dark-hidden theme-stored-light-hidden"
+                       title="Auto mode active">
+                        <i class="bi bi-circle-half"></i>
+                    </a>
+                </div>
             </div>
-        </div>
+        </dialog>
     </div>
 </nav>
-<main class="container my-2 flex-grow-1 d-flex flex-column">
+<main class="container py-2 flex-grow-1 d-flex flex-column">
     <div
             id="htmx-error"
-            class="alert alert-danger alert-dismissible fade show d-none"
+            class="alert theme-danger alert-dismissible fade show d-none"
             role="alert"
     >
         <span id="htmx-error-message"></span>
@@ -144,19 +147,19 @@
         ></button>
     </div>
     {% if error %}
-    <div class="alert alert-danger" role="alert">
+    <div class="alert theme-danger" role="alert">
         {{ error }}
     </div>
     {% endif %}
     {% if success %}
-    <div class="alert alert-success" role="alert">
+    <div class="alert theme-success" role="alert">
         {{ success }}
     </div>
     {% endif %}
     {% block content %}{% endblock %}
 </main>
 
-<footer class="text-muted py-3">
+<footer class="fg-3 py-3 flex-shrink-0">
     <div class="container text-center">
         <div class="row">
             <div class="col">&copy; 2026: <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache 2.0</a></div>

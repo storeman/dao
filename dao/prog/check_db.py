@@ -347,26 +347,21 @@ class CheckDB:
                 )
                 print('Defaults for "aggregate" set on table "variabel"')
 
-        # Create chart_style column if it does not exist
+        # Create chart color columns if they do not exist
         if self.ensure_column(
                 'variabel',
-                'chart_base_color',
+                'chart_color',
                 'VARCHAR(25)',
                 '#FFFFFF'):
-            with self.engine.begin() as connection:
-                qchart_base_color = self.engine.dialect.identifier_preparer.quote('chart_base_color')
-                connection.execute(
-                    text(
-                        f"""
-                        UPDATE variabel
-                        SET {qchart_base_color} = CASE
-                            WHEN dim IN ('kWh', 'euro', 'mm') THEN 'sum'
-                            ELSE 'avg'
-                        END
-                        """
-                    )
-                )
-                print('Defaults for "chart_base_color" set on table "variabel"')
+            print('Column "chart_color" added')
+
+        # Create chart color columns if they do not exist
+        if self.ensure_column(
+                'variabel',
+                'enabled',
+                'INTEGER',
+                '1'):
+            print('Column "enabled" added')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()
@@ -435,7 +430,7 @@ class CheckDB:
                         f"Index '{index_name}' toegevoegd aan tabel '{table_name}'."
                     )
 
-    def ensure_column(self, table_name: str, column_name: str, type: string, default: string = None) -> bool:
+    def ensure_column(self, table_name: str, column_name: str, type: String, default: String = None) -> bool:
         """
         Create a column on a table if it does not exist
         :return: Boolean indicating whether the column was created
