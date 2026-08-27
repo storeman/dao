@@ -75,7 +75,7 @@
                 <div class="col-12 md:col-6 mt-2">
                     <div class="input-group">
                         <span class="input-group-text">Aggregate: </span>
-                        <select name="aggregate" id="aggregate" class="form-control>
+                        <select name="aggregate" id="aggregate" class="form-control">
                             <option value="15min" {% if aggregate==
                             '15min' %}selected{% endif %}>15 min</option>
                             <option value="hour" {% if aggregate==
@@ -236,9 +236,10 @@
                     continue;
                 }
 
-                datasets.push(c);
+                datasets.unshift(c);
             } catch (e) {
                 // Skip
+                console.log(e);
             }
         }
 
