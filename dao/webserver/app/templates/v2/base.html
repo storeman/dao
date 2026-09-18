@@ -1,8 +1,12 @@
-{% macro nav_item(endpoint, label, icon=None, url=None, menu=False) %}
-<li class="{{ 'menu-item' if menu else 'nav-item' }}">
-    <a class="{{ 'menu-item' if menu else 'nav-link' }} {% if request.endpoint == endpoint %}active{% endif %}"
+{% macro nav_item(endpoint, label, icon=None, url=None) %}
+<li class="nav-item">
+    <a class="nav-link {% if request.endpoint == endpoint %}active{% endif %}"
        aria-current="page" href="{% if url %}{{url}}{% else %}{{ url_for(endpoint) }}{% endif %}">{{label}}</a>
 </li>
+{% endmacro %}
+{% macro menu_item(endpoint, label, icon=None, url=None) %}
+<a class="menu-item {% if request.endpoint == endpoint %}active{% endif %}"
+   aria-current="page" href="{% if url %}{{url}}{% else %}{{ url_for(endpoint) }}{% endif %}">{{label}}</a>
 {% endmacro %}
 
 <!doctype html>
@@ -85,11 +89,11 @@
 <nav class="navbar lg:navbar-expand bg-3 flex-shrink-0">
     <div class="container">
         <a class="navbar-brand text-center" href="{{ url_for('v2.chart') }}">DAO</a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="drawer" data-bs-target="#navbarSupportedContent"
+        <button class="btn-icon navbar-toggler" type="button" data-bs-toggle="drawer" data-bs-target="#navbarSupportedContent"
                 aria-controls="navbarSupportedContent" aria-expanded="false" aria-label="Toggle navigation">
             <span class="navbar-toggler-icon"></span>
         </button>
-        <dialog class="drawer lg:drawer drawer-sheet" id="navbarSupportedContent">
+        <dialog class="drawer drawer-end" id="navbarSupportedContent">
             <div class="drawer-body">
                 <ul class="navbar-nav me-auto mb-2 lg:mb-0">
                     {{ nav_item('v2.chart', 'Charts') }}
@@ -104,12 +108,22 @@
                            aria-expanded="false">
                             Admin
                         </a>
-                        <ul class="menu">
-                            {{ nav_item('v2.config', 'Config', menu=True) }}
-                            {{ nav_item('v2.secrets', 'Secrets', menu=True) }}
-                            {{ nav_item('v2.view_file', 'dashboard.log', url=url_for('v2.view_file', file='dashboard.log'), menu=True) }}
-                            {{ nav_item('v2.config_vars', 'Vars', menu=True) }}
-                        </ul>
+                        <div class="menu">
+                            {{ menu_item('v2.config', 'Config') }}
+                            {{ menu_item('v2.secrets', 'Secrets') }}
+                            {{ menu_item('v2.view_file', 'dashboard.log', url=url_for('v2.view_file', file='dashboard.log')) }}
+                        </div>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link" href="#" role="button" data-bs-toggle="menu"
+                           aria-expanded="false">
+                            About
+                        </a>
+                        <div class="menu">
+                            {{ menu_item('', 'Github', url='https://github.com/corneel27/day-ahead/') }}
+                            {{ menu_item('', 'Wiki', url='https://github.com/corneel27/day-ahead/wiki') }}
+                            {{ menu_item('home', 'legacy UI') }}
+                        </div>
                     </li>
                 </ul>
                 <div class="align-items-center d-flex float-end">
@@ -160,13 +174,10 @@
 </main>
 
 <footer class="fg-3 py-3 flex-shrink-0">
-    <div class="container text-center">
+    <div class="container text-center text-xs">
         <div class="row">
-            <div class="col">&copy; 2026: <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache 2.0</a></div>
-            <div class="col"><small>Version: {{version}}</small></div>
-            <div class="col"><a aria-current="page" href="{{ url_for('home') }}">legacy UI</a></div>
-            <div class="col"><a aria-current="page" href="https://github.com/corneel27/">Github</a></div>
-            <div class="col"><a aria-current="page" href="https://github.com/corneel27/day-ahead/wiki">Wiki</a></div>
+            <div class="col">&copy; 2026 <a href="https://www.apache.org/licenses/LICENSE-2.0">Apache 2.0</a></div>
+            <div class="col"><small>{{version}}</small></div>
         </div>
     </div>
 </footer>

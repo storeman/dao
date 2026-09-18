@@ -305,7 +305,6 @@ def log():
 def delete_file():
     post_data = request.form.to_dict(flat=True)
 
-    post_data = request.form.to_dict(flat=True)
     if post_data["confirm"] == "1" and re.match(r'^(images|log)/[^/]+\.(log|png)$', post_data["file"]):
         os.remove(app_datapath + post_data["file"])
 
@@ -620,7 +619,7 @@ def reportsv2():
     fields = fields.split(",")
 
     report = Report(app_datapath + "/options.json")
-    vars = report.get_vars(True)
+    vars = report.get_vars()
 
     return render_template(
         "v2/reports-v2.html",
@@ -689,69 +688,6 @@ def secrets():
         content=content,
         success=success,
         error=error,
-    )
-
-
-@v2.route("/config-vars", methods=["GET", "POST"])
-def config_vars():
-    report = Report(app_datapath + "/options.json")
-
-    metadata = report.db_da.metadata
-    engine = report.db_da.engine
-
-    variabel = Table("variabel", metadata, autoload_with=engine)
-    if request.method == "POST":
-        rows = {}
-        pattern = re.compile(r"^var\[(\d+)\]\[([a-zA-Z0-9_]+)\]$")
-
-        allowed_fields = {
-            "name",
-            "enabled",
-            "chart_color",
-        }
-
-        for key, value in request.form.items():
-            match = pattern.match(key)
-            if not match:
-                continue
-
-            row_id = int(match.group(1))
-            field = match.group(2)
-
-            if field not in allowed_fields:
-                continue
-
-            value = request.form.getlist(key)[-1]
-            rows.setdefault(row_id, {})[field] = value
-
-        updates = [
-            {
-                "_id": row_id,
-                **values,
-            }
-            for row_id, values in rows.items()
-        ]
-
-        stmt = (
-            update(variabel)
-            .where(variabel.c.id == bindparam("_id"))
-            .values(
-                name=bindparam("name"),
-                chart_color=bindparam("chart_color"),
-            )
-        )
-
-        with engine.begin() as conn:
-            conn.execute(stmt, updates)
-
-    with engine.connect() as conn:
-        select = variabel.select()
-
-        vars = conn.execute(select).fetchall()
-
-    return render_template(
-        "v2/config-vars.html",
-        vars=vars,
     )
 
 @v2.route("/view-file", methods=["GET", "POST"])

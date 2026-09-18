@@ -78,9 +78,9 @@ class CheckDB:
         return
 
     def get_all_var_data(
-            self,
-            tablename: str,
-            column_name: str,
+        self,
+        tablename: str,
+        column_name: str,
     ):
         """
         Retourneert een dataframe
@@ -110,9 +110,9 @@ class CheckDB:
         return df
 
     def delete_all_var_data(
-            self,
-            tablename: str,
-            variabel_id: int,
+        self,
+        tablename: str,
+        variabel_id: int,
     ):
         values_table = Table(tablename, self.db_da.metadata, autoload_with=self.engine)
         delete_stmt = delete(values_table).where(
@@ -346,22 +346,6 @@ class CheckDB:
                     )
                 )
                 print('Defaults for "aggregate" set on table "variabel"')
-
-        # Create chart color columns if they do not exist
-        if self.ensure_column(
-                'variabel',
-                'chart_color',
-                'VARCHAR(25)',
-                '#FFFFFF'):
-            print('Column "chart_color" added')
-
-        # Create chart color columns if they do not exist
-        if self.ensure_column(
-                'variabel',
-                'enabled',
-                'INTEGER',
-                '1'):
-            print('Column "enabled" added')
 
         # Voeg indexen toe op kolom `time` in de values en prognoses tabel, indien niet bestaand
         self.ensure_time_indexes()

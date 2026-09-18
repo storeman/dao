@@ -2,6 +2,20 @@
 @import "bootstrap-icons/font/bootstrap-icons.css";
 @import "prismjs/themes/prism.css";
 
+@layer components {
+
+  .navbar-toggler-icon {
+    mask-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3e%3cpath stroke='black' stroke-linecap='round' stroke-width='1' d='M1 3.5h14M1 8h14M1 12.5h14'/%3e%3c/svg%3e");
+    height: 1.25rem;
+    width: 1.25rem;
+    background-color: currentColor;
+    display: inline-block;
+    mask-position: 50%;
+    mask-size: contain;
+    mask-repeat: no-repeat;
+  }
+}
+
 .icon-nav {
   .bi {
     font-size: 200%;
