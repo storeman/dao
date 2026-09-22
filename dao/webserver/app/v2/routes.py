@@ -743,6 +743,7 @@ def _datasets_config():
             "borderColor": _alter_hex(color, 0.8),
             "backgroundColor": color,
             "type": "bar" if row.dim == "kWh" else "line",
+            "stepped": True if row.dim == "euro/kWh" else False,
             "yAxisID": f"y_{row.dim}",
             "unit": row.dim,
         })
