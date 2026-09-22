@@ -1,14 +1,14 @@
-import time, os, fnmatch, re, datetime, time, threading, json
+import os, fnmatch, re, datetime, time, threading, json
 from flask import Blueprint, render_template, request, redirect, url_for
 
 from dao.prog.version import __version__
-from subprocess import Popen, PIPE, run, STDOUT, DEVNULL
+from subprocess import Popen, DEVNULL
 from pathlib import Path
 from dao.prog.da_report import Report
 from dao.prog.config.loader import ConfigurationLoader
 
 from sqlalchemy import (
-    Table, update, bindparam
+    Table
 )
 
 v2 = Blueprint("v2", __name__)
@@ -273,7 +273,7 @@ def get_solar_items_with_ml():
 
 @v2.route("/")
 @v2.route("/chart")
-def chart():
+def home():
     kwargs = log_chart("images/", "*.png")
     if kwargs is None:
         return render_template("v2/no-tasks.html", )
@@ -730,13 +730,12 @@ def _datasets_config():
     with engine.connect() as conn:
         vars = conn.execute(
             variabel.select()
-            .where(variabel.c.enabled == 1)
         ).fetchall()
 
     datasets = []
 
     for row in vars:
-        color = row.chart_color or "#ffffff"
+        color = "#ffffff"
 
         datasets.append({
             "label": row.name,
