@@ -31,17 +31,16 @@ jobs:
           cache: 'pip'
 
       - name: Install dependencies
-        # da_debug.py imports pandas unconditionally at module level, so it's
-        # needed here even though scenario-validate itself never touches it.
+        # pandas is needed by the scenario tooling and price parser unit tests.
         run: |
           python -m pip install --upgrade pip
-          pip install pytest pydantic pydantic-settings pandas
+          pip install pytest pydantic pydantic-settings pandas entsoe-py nordpool sqlalchemy sqlalchemy-utils python-dateutil
 
       - name: Validate scenario corpus
         run: python -m dao.prog.da_debug scenario-validate
 
       - name: Run solver-free unit tests
-        run: pytest dao/tests/prog/test_scenarios.py -q
+        run: pytest dao/tests/prog/test_scenarios.py dao/tests/lib/test_da_prices.py -q
 
   scenarios:
     name: Scenario suite (solve)

@@ -13,6 +13,101 @@ from requests import get, post
 from dao.lib.db_manager import DBmanagerObj
 
 
+def parse_entsoe_prices(data: pd.DataFrame, start, end) -> pd.DataFrame | None:
+    """Convert an ENTSO-E series into the existing DAO database frame."""
+    if len(data.index) == 0:
+        return None
+
+    df_db = pd.DataFrame(columns=["time", "code", "value"])
+    data = data.reset_index()
+    logging.info(f"Day ahead prijzen van Entsoe: \n{data.to_string(index=False)}")
+    last_time = start
+    for row in data.itertuples():
+        last_time = int(datetime.datetime.timestamp(row[1]))
+        df_db.loc[df_db.shape[0]] = [str(last_time), "da", row[2] / 1000]
+    logging.debug(
+        f"Day ahead prijzen (source: entsoe, db-records): \n"
+        f"{df_db.to_string(index=False)}"
+    )
+
+    end_dt = datetime.datetime(end.year, end.month, end.day, 23)
+    last_time_dt = datetime.datetime.fromtimestamp(last_time)
+    if last_time_dt < end_dt:
+        if len(df_db) == 0:
+            logging.error(f"Geen data van Entsoe tot en met {end_dt}")
+        else:
+            logging.warning(f"Geen data van Entsoe tussen {last_time_dt} en {end_dt}")
+    return df_db
+
+
+def parse_tibber_prices(data: dict) -> pd.DataFrame:
+    """Convert Tibber's GraphQL response into the existing DAO database frame."""
+    today_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
+        "priceInfo"
+    ]["today"]
+    tomorrow_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
+        "priceInfo"
+    ]["tomorrow"]
+    range_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
+        "priceInfoRange"
+    ]["nodes"]
+    df_db = pd.DataFrame(columns=["time", "code", "value"])
+    for nodes in [today_nodes, tomorrow_nodes, range_nodes]:
+        for node in nodes:
+            timestamp_dt = datetime.datetime.strptime(
+                node["startsAt"], "%Y-%m-%dT%H:%M:%S.%f%z"
+            )
+            timestamp = int(timestamp_dt.timestamp())
+            value = float(node["energy"])
+            logging.info(f"{node} {timestamp_dt} {timestamp} {value}")
+            df_db.loc[df_db.shape[0]] = [timestamp, "da", value]
+    logging.debug(
+        f"Day ahead prijzen (source: tibber, db-records): \n "
+        f"{df_db.to_string(index=False)}"
+    )
+    return df_db
+
+
+def parse_easyenergy_prices(data: list[dict]) -> pd.DataFrame:
+    """Convert EasyEnergy's JSON response into the existing DAO database frame."""
+    frame = pd.DataFrame.from_records(data)
+    logging.info(
+        f"Day ahead prijzen van Easyenergy:\n {frame.to_string(index=False)}"
+    )
+    df_db = pd.DataFrame(columns=["time", "code", "value"])
+    frame = frame.reset_index()
+    for row in frame.itertuples():
+        timestamp = str(
+            int(datetime.datetime.fromisoformat(row.Timestamp).timestamp())
+        )
+        df_db.loc[df_db.shape[0]] = [timestamp, "da", row.TariffReturn]
+    return df_db
+
+
+def parse_nordpool_prices(data: dict, country: str, date) -> pd.DataFrame:
+    """Convert a Nordpool response into the existing DAO database frame."""
+    values = data["areas"][country]["values"]
+    logging.info(f"Day ahead prijzen van Nordpool:\n {pp.pformat(values, indent=2)}")
+    df_db = pd.DataFrame(columns=["time", "code", "value"])
+    for row in values:
+        timestamp = int(row["start"].timestamp())
+        value = row["value"]
+        if value == float("inf"):
+            continue
+        df_db.loc[df_db.shape[0]] = [str(timestamp), "da", value / 1000]
+    logging.debug(
+        f"Day ahead prices for "
+        f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'}"
+        f" (source: nordpool, db-records): \n {df_db.to_string(index=False)}"
+    )
+    if df_db.empty:
+        logging.warning(
+            f"Retrieve of day ahead prices for "
+            f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'} failed"
+        )
+    return df_db
+
+
 class DaPrices:
     def __init__(
         self, config,
@@ -138,33 +233,7 @@ class DaPrices:
             logging.error(ex)
             logging.error(f"Geen data van Entsoe: tussen {start} en {end}")
         if len(da_prices.index) > 0:
-            df_db = pd.DataFrame(columns=["time", "code", "value"])
-            da_prices = (
-                da_prices.reset_index()
-            )  # make sure indexes pair with number of rows
-            logging.info(
-                f"Day ahead prijzen van Entsoe: \n{da_prices.to_string(index=False)}"
-            )
-            last_time = start
-            for row in da_prices.itertuples():
-                last_time = int(datetime.datetime.timestamp(row[1]))
-                df_db.loc[df_db.shape[0]] = [str(last_time), "da", row[2] / 1000]
-            logging.debug(
-                f"Day ahead prijzen (source: entsoe, db-records): \n"
-                f"{df_db.to_string(index=False)}"
-            )
-
-            end_dt = datetime.datetime(end.year, end.month, end.day, 23)
-            last_time_dt = datetime.datetime.fromtimestamp(last_time)
-            if last_time_dt < end_dt:
-                if len(df_db) == 0:
-                    logging.error(f"Geen data van Entsoe tot en met {end_dt}")
-                else:
-                    logging.warning(
-                        f"Geen data van Entsoe tussen {last_time_dt} en {end_dt}"
-                    )
-
-            return df_db
+            return parse_entsoe_prices(da_prices, start, end)
 
     def _get_prices_tibber(self, date):
         now_ts = datetime.datetime.now().timestamp()
@@ -226,30 +295,7 @@ class DaPrices:
         }
         resp = post(url, headers=headers, data=query)
         tibber_dict = json.loads(resp.text)
-        today_nodes = tibber_dict["data"]["viewer"]["homes"][0][
-            "currentSubscription"
-        ]["priceInfo"]["today"]
-        tomorrow_nodes = tibber_dict["data"]["viewer"]["homes"][0][
-            "currentSubscription"
-        ]["priceInfo"]["tomorrow"]
-        range_nodes = tibber_dict["data"]["viewer"]["homes"][0][
-            "currentSubscription"
-        ]["priceInfoRange"]["nodes"]
-        df_db = pd.DataFrame(columns=["time", "code", "value"])
-        for lst in [today_nodes, tomorrow_nodes, range_nodes]:
-            for node in lst:
-                dt = datetime.datetime.strptime(
-                    node["startsAt"], "%Y-%m-%dT%H:%M:%S.%f%z"
-                )
-                time_stamp = int(dt.timestamp())
-                value = float(node["energy"])
-                logging.info(f"{node} {dt} {time_stamp} {value}")
-                df_db.loc[df_db.shape[0]] = [time_stamp, "da", value]
-        logging.debug(
-            f"Day ahead prijzen (source: tibber, db-records): \n "
-            f"{df_db.to_string(index=False)}"
-        )
-        return df_db
+        return parse_tibber_prices(tibber_dict)
 
     def _get_prices_easyenergy(self, start, end):
         # ophalen bij EasyEnergy
@@ -265,20 +311,7 @@ class DaPrices:
         resp = get(url)
         logging.debug(resp.text)
         json_object = json.loads(resp.text)
-        df = pd.DataFrame.from_records(json_object)
-        logging.info(
-            f"Day ahead prijzen van Easyenergy:\n {df.to_string(index=False)}"
-        )
-        # datetime.datetime.strptime('Tue Jun 22 12:10:20 2010 EST', '%a %b %d %H:%M:%S %Y %Z')
-        df_db = pd.DataFrame(columns=["time", "code", "value"])
-        df = df.reset_index()  # make sure indexes pair with number of rows
-        for row in df.itertuples():
-            dtime = str(
-                int(datetime.datetime.fromisoformat(row.Timestamp).timestamp())
-            )
-            df_db.loc[df_db.shape[0]] = [dtime, "da", row.TariffReturn]
-
-        return df_db
+        return parse_easyenergy_prices(json_object)
 
     def _get_prices_nordpool(self, resolution, date):
 
@@ -297,31 +330,7 @@ class DaPrices:
             logging.error(f"Geen data van Nordpool voor {date}")
             return
 
-        act_values = act_spot_prices["areas"][self.country]["values"]
-        s = pp.pformat(act_values, indent=2)
-        logging.info(f"Day ahead prijzen van Nordpool:\n {s}")
-        df_db = pd.DataFrame(columns=["time", "code", "value"])
-        for act_value in act_values:
-            time_dt = act_value["start"]
-            time_ts = int(time_dt.timestamp())
-            value = act_value["value"]
-            if value == float("inf"):
-                continue
-            else:
-                value = value / 1000
-            df_db.loc[df_db.shape[0]] = [str(time_ts), "da", value]
-        logging.debug(
-            f"Day ahead prices for "
-            f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'}"
-            f" (source: nordpool, db-records): \n {df_db.to_string(index=False)}"
-        )
-        if df_db.empty:
-            logging.warning(
-                f"Retrieve of day ahead prices for "
-                f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'} "
-                f"failed"
-            )
-        return df_db
+        return parse_nordpool_prices(act_spot_prices, self.country, date)
 
     def extract_data_epexpredictor(self,
                                    data:dict,
