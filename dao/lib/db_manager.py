@@ -10,11 +10,11 @@ from sqlalchemy import (
     and_,
     bindparam,
     create_engine,
+    delete,
     func,
     insert,
     select,
     update,
-    delete,
 )
 
 from dao.prog.utils import interpolate

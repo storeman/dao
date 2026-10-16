@@ -128,7 +128,7 @@ class DaPrices:
                 logging.info("Spot prices already present")
                 return
 
-        logging.debug(f"Day ahead tarieven ophalen voor {start} tot {end}")
+        logging.info(f"Day ahead tarieven bij \"{source}\" ophalen van \"{start}\" tot \"{end}\":")
 
         # Nordpool only returns one date per request, so fetch each date.
         prices = []
@@ -165,11 +165,10 @@ class DaPrices:
 
         end_dt = end - datetime.timedelta(minutes=resolution)
         if len(prices) == 0:
-            logging.error(
-                f"Geen data van {source} voor het gevraagde bereik "
-                f"{start} tot en met {end_dt}"
-            )
+            logging.error(f"Day Ahead tarieven bij {source}: geen tarieven voor het gevraagde bereik")
         else:
+            logging.info(f"Day Ahead tarieven bij {source}: %s tarieven opgehaald", len(prices))
+
             last_time = max(int(timestamp) for timestamp, _ in prices)
             last_time_dt = datetime.datetime.fromtimestamp(
                 last_time, tz=end.tzinfo
@@ -184,13 +183,14 @@ class DaPrices:
             df_db = df_db[["time", "code", "value"]]
             timestamps = df_db["time"].astype(int)
             delete_start = self._timezoned_datetime(datetime.datetime.fromtimestamp(
-                int(timestamps.min()), tz=datetime.timezone.utc
+                int(timestamps.min()), tz=datetime.UTC
             ))
             delete_end = self._timezoned_datetime(datetime.datetime.fromtimestamp(
-                int(timestamps.max()), tz=datetime.timezone.utc
+                int(timestamps.max()), tz=datetime.UTC
             ))
             self.db_da.deleterange("da", delete_start, delete_end)
             self.db_da.savedata(df_db)
+            logging.info("Day Ahead tarieven bijgewerkt in database")
 
     def _get_prices_entsoe(self, start, end):
         _ak = self.config.prices.entsoe_api_key
@@ -211,7 +211,7 @@ class DaPrices:
         return parse_entsoe_prices(da_prices)
 
     def _get_prices_tibber(self, date):
-        now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
+        now_ts = datetime.datetime.now(datetime.UTC).timestamp()
         get_ts = date.timestamp()
         count = 1 + math.ceil((now_ts - get_ts) / 3600)
         if self.interval == "1hour":
@@ -284,9 +284,8 @@ class DaPrices:
                 + endstr
         )
         resp = get(url)
-        logging.debug(resp.text)
+        logging.debug("Response van Easyenergy: resp.text")
         json_object = json.loads(resp.text)
-        logging.info(f"Day ahead prijzen van Easyenergy: {json_object}")
         return parse_easyenergy_prices(json_object, self.time_zone)
 
     def _get_prices_nordpool(self, resolution, date):
@@ -306,7 +305,6 @@ class DaPrices:
             logging.error(f"Geen data van Nordpool voor {date}")
             return []
 
-        logging.info(f"Day ahead prijzen van Nordpool:")
         return parse_nordpool_prices(act_spot_prices, self.country, self.time_zone)
 
     def extract_data_epexpredictor(self,
@@ -455,7 +453,7 @@ class DaPrices:
         ]
         """
         df_db = pd.DataFrame(columns=["time", "tijd", "code", "value"])
-        tz = pytz.timezone(self.time_zone)
+        tz = self.time_zone
         for row in data:
             utc_dt_str = row["datum_utc"]+"+00:00"
             utc_dt = datetime.datetime.fromisoformat(utc_dt_str)

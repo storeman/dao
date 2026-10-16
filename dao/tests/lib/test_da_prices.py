@@ -140,7 +140,7 @@ def test_get_prices_fetches_range_and_saves_provider_results():
 
     assert calls == [(start, end)]
     assert database.deleted == [
-        ('da', dt.datetime(2025, 12, 31, 23, 0, tzinfo=dt.timezone.utc), dt.datetime(2026, 1, 1, 0, 0, tzinfo=dt.timezone.utc))]
+        ('da', dt.datetime(2025, 12, 31, 23, 0, tzinfo=dt.UTC), dt.datetime(2026, 1, 1, 0, 0, tzinfo=dt.UTC))]
     assert len(database.saved) == 1
     assert database.saved[0].to_dict("records") == [
         {"time": provider_prices[0][0], "code": "da", "value": 0.1},
