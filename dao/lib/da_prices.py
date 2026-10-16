@@ -2,10 +2,9 @@ import datetime
 import json
 import logging
 import math
-import pprint as pp
+from zoneinfo import ZoneInfo
 
 import pandas as pd
-import pytz
 from entsoe import EntsoePandasClient
 from nordpool.elspot import Prices as NordpoolPrices
 from requests import get, post
@@ -13,99 +12,66 @@ from requests import get, post
 from dao.lib.db_manager import DBmanagerObj
 
 
-def parse_entsoe_prices(data: pd.DataFrame, start, end) -> pd.DataFrame | None:
-    """Convert an ENTSO-E series into the existing DAO database frame."""
-    if len(data.index) == 0:
-        return None
+def parse_entsoe_prices(data: pd.Series) -> list[tuple[int, float]]:
+    """Convert ENTSO-E's price series (€/MWh) to DAO's €/kWh pairs."""
+    if data.empty:
+        return []
+    indexed = data.reset_index()
+    prices = []
+    for row in indexed.itertuples():
+        prices.append((int(datetime.datetime.timestamp(row[1])), row[2] / 1000))
+    return prices
 
-    df_db = pd.DataFrame(columns=["time", "code", "value"])
-    data = data.reset_index()
-    logging.info(f"Day ahead prijzen van Entsoe: \n{data.to_string(index=False)}")
-    last_time = start
-    for row in data.itertuples():
-        last_time = int(datetime.datetime.timestamp(row[1]))
-        df_db.loc[df_db.shape[0]] = [str(last_time), "da", row[2] / 1000]
-    logging.debug(
-        f"Day ahead prijzen (source: entsoe, db-records): \n"
-        f"{df_db.to_string(index=False)}"
-    )
 
-    end_dt = datetime.datetime(end.year, end.month, end.day, 23)
-    last_time_dt = datetime.datetime.fromtimestamp(last_time)
-    if last_time_dt < end_dt:
-        if len(df_db) == 0:
-            logging.error(f"Geen data van Entsoe tot en met {end_dt}")
+def parse_easyenergy_prices(
+    data: list[dict], time_zone: ZoneInfo
+) -> list[tuple[int, float]]:
+    """Convert the EasyEnergy tariff response to timestamp/value pairs."""
+    prices = []
+    for row in data:
+        timestamp = datetime.datetime.fromisoformat(row["Timestamp"])
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=time_zone)
         else:
-            logging.warning(f"Geen data van Entsoe tussen {last_time_dt} en {end_dt}")
-    return df_db
+            timestamp = timestamp.astimezone(time_zone)
+        prices.append((int(timestamp.timestamp()), row["TariffReturn"]))
+    return prices
 
 
-def parse_tibber_prices(data: dict) -> pd.DataFrame:
-    """Convert Tibber's GraphQL response into the existing DAO database frame."""
-    today_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
-        "priceInfo"
-    ]["today"]
-    tomorrow_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
-        "priceInfo"
-    ]["tomorrow"]
-    range_nodes = data["data"]["viewer"]["homes"][0]["currentSubscription"][
-        "priceInfoRange"
-    ]["nodes"]
-    df_db = pd.DataFrame(columns=["time", "code", "value"])
-    for nodes in [today_nodes, tomorrow_nodes, range_nodes]:
-        for node in nodes:
-            timestamp_dt = datetime.datetime.strptime(
-                node["startsAt"], "%Y-%m-%dT%H:%M:%S.%f%z"
-            )
-            timestamp = int(timestamp_dt.timestamp())
-            value = float(node["energy"])
-            logging.info(f"{node} {timestamp_dt} {timestamp} {value}")
-            df_db.loc[df_db.shape[0]] = [timestamp, "da", value]
-    logging.debug(
-        f"Day ahead prijzen (source: tibber, db-records): \n "
-        f"{df_db.to_string(index=False)}"
+def parse_tibber_prices(data: dict) -> list[tuple[int, float]]:
+    """Convert the Tibber GraphQL price response to timestamp/value pairs."""
+    subscription = data["data"]["viewer"]["homes"][0]["currentSubscription"]
+    price_info = subscription["priceInfo"]
+    nodes = (
+        price_info["today"]
+        + price_info["tomorrow"]
+        + subscription["priceInfoRange"]["nodes"]
     )
-    return df_db
-
-
-def parse_easyenergy_prices(data: list[dict]) -> pd.DataFrame:
-    """Convert EasyEnergy's JSON response into the existing DAO database frame."""
-    frame = pd.DataFrame.from_records(data)
-    logging.info(
-        f"Day ahead prijzen van Easyenergy:\n {frame.to_string(index=False)}"
-    )
-    df_db = pd.DataFrame(columns=["time", "code", "value"])
-    frame = frame.reset_index()
-    for row in frame.itertuples():
-        timestamp = str(
-            int(datetime.datetime.fromisoformat(row.Timestamp).timestamp())
+    prices = []
+    for node in nodes:
+        dt = datetime.datetime.strptime(
+            node["startsAt"], "%Y-%m-%dT%H:%M:%S.%f%z"
         )
-        df_db.loc[df_db.shape[0]] = [timestamp, "da", row.TariffReturn]
-    return df_db
+        prices.append((int(dt.timestamp()), float(node["energy"])))
+    return prices
 
 
-def parse_nordpool_prices(data: dict, country: str, date) -> pd.DataFrame:
-    """Convert a Nordpool response into the existing DAO database frame."""
-    values = data["areas"][country]["values"]
-    logging.info(f"Day ahead prijzen van Nordpool:\n {pp.pformat(values, indent=2)}")
-    df_db = pd.DataFrame(columns=["time", "code", "value"])
-    for row in values:
-        timestamp = int(row["start"].timestamp())
-        value = row["value"]
+def parse_nordpool_prices(
+    data: dict, country: str, time_zone: ZoneInfo
+) -> list[tuple[int, float]]:
+    """Convert a Nordpool daily response from €/MWh to DAO price pairs."""
+    prices = []
+    for value_row in data["areas"][country]["values"]:
+        start = value_row["start"]
+        if start.tzinfo is None:
+            start = start.replace(tzinfo=time_zone)
+        else:
+            start = start.astimezone(time_zone)
+        value = value_row["value"]
         if value == float("inf"):
             continue
-        df_db.loc[df_db.shape[0]] = [str(timestamp), "da", value / 1000]
-    logging.debug(
-        f"Day ahead prices for "
-        f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'}"
-        f" (source: nordpool, db-records): \n {df_db.to_string(index=False)}"
-    )
-    if df_db.empty:
-        logging.warning(
-            f"Retrieve of day ahead prices for "
-            f"{date.strftime('%Y-%m-%d') if date else 'tomorrow'} failed"
-        )
-    return df_db
+        prices.append((int(start.timestamp()), value / 1000))
+    return prices
 
 
 class DaPrices:
@@ -114,14 +80,20 @@ class DaPrices:
             db_da: DBmanagerObj,
             country: str = None,
             secrets: dict = None,
-            time_zone: str = "CET"
+            time_zone: str = "Europe/Amsterdam"
     ):
         self.config = config
         self.db_da = db_da
         self._secrets = secrets or {}
         self.interval = str(config.interval or "1hour").lower()
         self.country = country if country is not None else "NL"
-        self.time_zone = time_zone if time_zone is not None else "CET"
+        self.time_zone = ZoneInfo(time_zone) if time_zone is not None else ZoneInfo("Europe/Amsterdam")
+
+    def _timezoned_datetime(self, value: datetime.datetime) -> datetime.datetime:
+        """Interpret naive datetimes as local time; convert tz aware ones."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=self.time_zone)
+        return value.astimezone(self.time_zone)
 
     def get_prices(
         self, source, _start: datetime.datetime|None = None, _end: datetime.datetime|None = None
@@ -130,36 +102,25 @@ class DaPrices:
             resolution = 60
         else:
             resolution = 15
-        now = datetime.datetime.now()
-        # start
+        now = datetime.datetime.now(self.time_zone)
+
         if _start is None:
-            start = pd.Timestamp(
-                year=now.year, month=now.month, day=now.day, tz="CET"
-            )
+            start = now.replace(hour=0, minute=0, second=0, microsecond=0)
         else:
-            start = _start
-        # end
+            start = self._timezoned_datetime(_start)
+
         if _end is None:
-            end = pd.Timestamp(
-                year=now.year, month=now.month, day=now.day, tz="CET"
-            )
+            end = now.replace(hour=0, minute=0, second=0, microsecond=0)
             if now.hour < 12:
                 end = end + datetime.timedelta(days=1)
             else:
                 end = end + datetime.timedelta(days=2)
         else:
-            end = _end
-
-        tz = pytz.timezone("CET")
-        if start.tzinfo is None:
-            start = tz.normalize(tz.localize(start))
-
-        if end.tzinfo is None:
-            end = tz.normalize(tz.localize(end))
+            end = self._timezoned_datetime(_end)
 
         present = self.db_da.get_time_border_record("da")
         if present is not None and _start is None:
-            present = tz.normalize(tz.localize(present))
+            present = self._timezoned_datetime(present)
             present = present + datetime.timedelta(minutes=resolution)
             start = max(present, start)
 
@@ -169,10 +130,10 @@ class DaPrices:
 
         logging.debug(f"Day ahead tarieven ophalen voor {start} tot {end}")
 
-        # For providers that only return data for one date, we need to check
-        # what dates are already present and fetch only missing ones
+        # Nordpool only returns one date per request, so fetch each date.
+        prices = []
+
         if source.lower() == "nordpool":
-            df_db = None
 
             # Process each day in the range separately
             current_date = start
@@ -181,62 +142,76 @@ class DaPrices:
                 current_end = current_date + datetime.timedelta(days=1)
 
                 try:
-                    # Fetch data for this specific day
-                    if source.lower() == "nordpool":
-                        daily_df = self._get_prices_nordpool(resolution, current_date)
-
-                    if daily_df is not None and len(daily_df) > 0:
-                        if df_db is None:
-                            df_db = daily_df
-                        else:
-                            df_db = pd.concat([df_db, daily_df], ignore_index=True)
+                    daily_prices = self._get_prices_nordpool(resolution, current_date)
+                    if daily_prices:
+                        prices.extend(daily_prices)
 
                 except Exception as ex:
                     logging.error(f"Error fetching data for {current_date.date()}: {ex}")
 
                 current_date = current_end
 
-            # Save all the fetched data at once
-            if df_db is not None and len(df_db) > 0:
-                self.db_da.savedata(df_db)
-
         else:
             # For other sources that support range queries
-            df_db = None
             # day-ahead market prices (€/MWh)
             if source.lower() == "entsoe":
-                df_db = self._get_prices_entsoe(start, end)
+                prices = self._get_prices_entsoe(start, end)
 
             if source.lower() == "easyenergy":
-                df_db = self._get_prices_easyenergy(start, end)
+                prices = self._get_prices_easyenergy(start, end) or []
 
             if source.lower() == "tibber":
-                df_db = self._get_prices_tibber(start)
+                prices = self._get_prices_tibber(start) or []
 
-            if df_db is not None:
-                self.db_da.savedata(df_db)
+        end_dt = end - datetime.timedelta(minutes=resolution)
+        if len(prices) == 0:
+            logging.error(
+                f"Geen data van {source} voor het gevraagde bereik "
+                f"{start} tot en met {end_dt}"
+            )
+        else:
+            last_time = max(int(timestamp) for timestamp, _ in prices)
+            last_time_dt = datetime.datetime.fromtimestamp(
+                last_time, tz=end.tzinfo
+            )
+            if last_time_dt < end_dt:
+                logging.warning(
+                    f"Geen data van {source} tussen {last_time_dt} en {end_dt}"
+                )
+
+            df_db = pd.DataFrame(prices, columns=["time", "value"])
+            df_db["code"] = "da"
+            df_db = df_db[["time", "code", "value"]]
+            timestamps = df_db["time"].astype(int)
+            delete_start = self._timezoned_datetime(datetime.datetime.fromtimestamp(
+                int(timestamps.min()), tz=datetime.timezone.utc
+            ))
+            delete_end = self._timezoned_datetime(datetime.datetime.fromtimestamp(
+                int(timestamps.max()), tz=datetime.timezone.utc
+            ))
+            self.db_da.deleterange("da", delete_start, delete_end)
+            self.db_da.savedata(df_db)
 
     def _get_prices_entsoe(self, start, end):
-        start = pd.Timestamp(
-            year=start.year, month=start.month, day=start.day, tz="CET"
-        )
-        end = pd.Timestamp(year=end.year, month=end.month, day=end.day, tz="CET")
         _ak = self.config.prices.entsoe_api_key
         api_key = _ak.resolve(self._secrets) if _ak is not None else None
         client = EntsoePandasClient(api_key=api_key)
-        da_prices = pd.DataFrame()
+        da_prices = pd.Series()
         try:
             da_prices = client.query_day_ahead_prices(
                 self.country, start=start, end=end
             )
         except Exception as ex:
             logging.error(ex)
-            logging.error(f"Geen data van Entsoe: tussen {start} en {end}")
+
         if len(da_prices.index) > 0:
-            return parse_entsoe_prices(da_prices, start, end)
+            logging.info(
+                f"Day ahead prijzen van Entsoe: \n{da_prices.to_string(index=False)}"
+            )
+        return parse_entsoe_prices(da_prices)
 
     def _get_prices_tibber(self, date):
-        now_ts = datetime.datetime.now().timestamp()
+        now_ts = datetime.datetime.now(datetime.timezone.utc).timestamp()
         get_ts = date.timestamp()
         count = 1 + math.ceil((now_ts - get_ts) / 3600)
         if self.interval == "1hour":
@@ -300,8 +275,8 @@ class DaPrices:
     def _get_prices_easyenergy(self, start, end):
         # ophalen bij EasyEnergy
         # 2022-06-25T00:00:00
-        startstr = start.strftime("%Y-%m-%dT%H:%M:%S")
-        endstr = end.strftime("%Y-%m-%dT%H:%M:%S")
+        startstr = self._timezoned_datetime(start).strftime("%Y-%m-%dT%H:%M:%S")
+        endstr = self._timezoned_datetime(end).strftime("%Y-%m-%dT%H:%M:%S")
         url = (
                 "https://mijn.easyenergy.com/nl/api/tariff/getapxtariffs?startTimestamp="
                 + startstr
@@ -311,7 +286,8 @@ class DaPrices:
         resp = get(url)
         logging.debug(resp.text)
         json_object = json.loads(resp.text)
-        return parse_easyenergy_prices(json_object)
+        logging.info(f"Day ahead prijzen van Easyenergy: {json_object}")
+        return parse_easyenergy_prices(json_object, self.time_zone)
 
     def _get_prices_nordpool(self, resolution, date):
 
@@ -325,12 +301,13 @@ class DaPrices:
         except Exception as ex:
             logging.exception(ex)
             logging.error(f"Fout bij ophalen data van Nordpool voor {date}")
-            return
+            return []
         if act_spot_prices is None:
             logging.error(f"Geen data van Nordpool voor {date}")
-            return
+            return []
 
-        return parse_nordpool_prices(act_spot_prices, self.country, date)
+        logging.info(f"Day ahead prijzen van Nordpool:")
+        return parse_nordpool_prices(act_spot_prices, self.country, self.time_zone)
 
     def extract_data_epexpredictor(self,
                                    data:dict,
@@ -398,11 +375,10 @@ class DaPrices:
         """
         rows = data.get('entries')
         df_db = pd.DataFrame(columns=["time", "tijd", "code", "value"])
-        tz = pytz.timezone(self.time_zone)
         for row in rows:
             utc_dt_str = row["start"].replace("Z", "+00:00")
             utc_dt = datetime.datetime.fromisoformat(utc_dt_str)
-            dt = utc_dt.astimezone(tz)   # tz.localize(dt)
+            dt = utc_dt.astimezone(self.time_zone)
             if know_at < dt <= new_horizon:
                 time_stamp = int(dt.timestamp())
                 value = float(row["value"])
@@ -501,9 +477,9 @@ class DaPrices:
         if extension == 0:
             logging.warning("predicted horizon extension is 0, no predicted prices are returned")
             return
-        known_at = self.db_da.get_time_border_record("da").astimezone()
+        known_at = self._timezoned_datetime(self.db_da.get_time_border_record("da"))
         new_horizon = known_at + datetime.timedelta(hours=extension)
-        now = datetime.datetime.now().astimezone()
+        now = datetime.datetime.now(self.time_zone)
         fetch_hours = math.ceil((new_horizon - now).total_seconds()/3600)
         api_url= api_url.replace("<hours>", str(fetch_hours))
         api_url= api_url.replace("<region>", self.country)
@@ -519,9 +495,5 @@ class DaPrices:
         json_object = json.loads(resp.text)
         extract_data_f = "extract_data_"+source
         df_db = getattr(self, extract_data_f)(json_object, known_at, new_horizon)
-        logging.info(
-            f"Day ahead prediction prijzen (source: {source}, db-records): \n "
-            f"{df_db.to_string(index=False)}"
-        )
         self.db_da.savedata(df_db, tablename="prognoses")
         return 0

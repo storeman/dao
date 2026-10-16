@@ -14,6 +14,7 @@ from sqlalchemy import (
     insert,
     select,
     update,
+    delete,
 )
 
 from dao.prog.utils import interpolate
@@ -306,6 +307,48 @@ class DBmanagerObj:
             if inserts:
                 connection.execute(insert(values_table), inserts)
             connection.commit()
+        finally:
+            connection.close()
+        self.log_pool_status()
+
+    def deleterange(self, code: str, start, end, tablename: str = "values"):
+        """
+        Delete records for the given code within the time range [start, end].
+        Args:
+            code: the code string (e.g. "da")
+            start: start datetime (will be converted to unix timestamp)
+            end: end datetime (will be converted to unix timestamp)
+            tablename: table name (values or prognoses)
+        """
+        start_ts = int(start.timestamp())
+        end_ts = int(end.timestamp())
+        logging.debug(f"Delete records for {code} from {start} to {end} ({start_ts} - {end_ts})")
+
+        connection = self.engine.connect()
+        try:
+            self.log_pool_status()
+            values_table = Table(tablename, self.metadata, autoload_with=self.engine)
+            variabel_table = Table("variabel", self.metadata, autoload_with=self.engine)
+
+            # Find the variabel id for the code
+            select_variabel = select(variabel_table.c.id).where(
+                variabel_table.c.code == code
+            )
+            variabel_id = connection.execute(select_variabel).scalar()
+            if variabel_id is None:
+                logging.error(f"Code {code} not found in variabel table")
+                return
+
+            # Delete records in the time range
+            del_stmt = (
+                delete(values_table)
+                .where(values_table.c.variabel == variabel_id)
+                .where(values_table.c.time >= start_ts)
+                .where(values_table.c.time <= end_ts)
+            )
+            result = connection.execute(del_stmt)
+            connection.commit()
+            logging.debug(f"Deleted {result.rowcount} records for {code} in range {start} to {end}")
         finally:
             connection.close()
         self.log_pool_status()
